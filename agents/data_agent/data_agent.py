@@ -1,16 +1,21 @@
 """
-Data Agent - Thu thập dữ liệu thị trường real-time
+Data Agent - Thu thập dữ liệu thị trường real-time từ Binance
 """
 import asyncio
 import json
 from datetime import datetime
 from typing import Dict, List
 import logging
+import sys
+import os
 
 from kafka import KafkaProducer
 import redis
-from binance.client import Client as BinanceClient
 import requests
+
+# Add parent directory to path to import binance_client
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from binance_client import BinanceClientWrapper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,15 +40,16 @@ class DataAgent:
             decode_responses=True
         )
         
-        # Binance client
-        self.binance_client = BinanceClient(
-            config['binance']['api_key'],
-            config['binance']['api_secret'],
-            testnet=config['binance']['testnet']
+        # Binance client (using Binance Connector)
+        self.binance_client = BinanceClientWrapper(
+            api_key=config['binance'].get('api_key'),
+            api_secret=config['binance'].get('api_secret'),
+            testnet=config['binance'].get('testnet', False)
         )
         
-        self.symbols = config['symbols']
+        self.symbols = config.get('symbols', ['BTCUSDT', 'ETHUSDT'])
         self.running = False
+        logger.info(f"🔍 Data Agent initialized for symbols: {self.symbols}")
         
     async def start(self):
         """Bắt đầu thu thập dữ liệu"""
@@ -64,26 +70,46 @@ class DataAgent:
             try:
                 for symbol in self.symbols:
                     # Lấy ticker 24h
-                    ticker = self.binance_client.get_ticker(symbol=symbol)
+                    ticker = self.binance_client.get_24h_ticker(symbol=symbol)
                     
-                    # Lấy klines (OHLCV)
-                    klines = self.binance_client.get_klines(
+                    if not ticker:
+                        logger.warning(f"Failed to get ticker for {symbol}")
+                        continue
+                    
+                    # Lấy klines (OHLCV) - multiple timeframes
+                    klines_1h = self.binance_client.get_klines(
+                        symbol=symbol,
+                        interval='1h',
+                        limit=24
+                    )
+                    
+                    klines_5m = self.binance_client.get_klines(
                         symbol=symbol,
                         interval='5m',
                         limit=100
                     )
                     
+                    # Lấy order book
+                    order_book = self.binance_client.get_order_book(symbol=symbol, limit=20)
+                    
                     market_data = {
                         'symbol': symbol,
-                        'price': float(ticker['lastPrice']),
-                        'volume': float(ticker['volume']),
-                        'high_24h': float(ticker['highPrice']),
-                        'low_24h': float(ticker['lowPrice']),
-                        'change_24h': float(ticker['priceChange']),
-                        'change_percent_24h': float(ticker['priceChangePercent']),
+                        'price': ticker['last_price'],
+                        'volume': ticker['volume'],
+                        'quote_volume': ticker['quote_volume'],
+                        'high_24h': ticker['high_24h'],
+                        'low_24h': ticker['low_24h'],
+                        'change_24h': ticker['price_change'],
+                        'change_percent_24h': ticker['price_change_percent'],
+                        'bid': ticker['bid'],
+                        'ask': ticker['ask'],
                         'timestamp': datetime.utcnow().isoformat(),
                         'source': 'binance',
-                        'klines': klines[-20:]  # Last 20 candles
+                        'klines': {
+                            '1h': klines_1h[-12:],  # Last 12 hours
+                            '5m': klines_5m[-20:]   # Last 100 minutes
+                        },
+                        'order_book': order_book,
                     }
                     
                     # Gửi vào Kafka
@@ -93,16 +119,16 @@ class DataAgent:
                     cache_key = f"market:{symbol}"
                     self.redis_client.setex(
                         cache_key,
-                        300,  # 5 minutes TTL
+                        60,  # 1 minute TTL
                         json.dumps(market_data)
                     )
                     
-                    logger.info(f"📊 {symbol}: ${market_data['price']}")
+                    logger.info(f"📊 {symbol}: ${ticker['last_price']} (24h: {ticker['price_change_percent']:+.2f}%)")
                 
                 await asyncio.sleep(5)  # 5 seconds interval
                 
             except Exception as e:
-                logger.error(f"Error collecting price data: {e}")
+                logger.error(f"Error collecting price data: {e}", exc_info=True)
                 await asyncio.sleep(10)
     
     async def collect_news_sentiment(self):

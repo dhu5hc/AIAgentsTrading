@@ -55,6 +55,15 @@ dependencies {
     // HTTP Client
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     
+    // Binance Connector Java
+    implementation("com.binance.connector:binance-connector-java:3.5.0")
+    
+    // JSON parsing
+    implementation("org.json:json:20231013")
+    
+    // OkHttp for HTTP requests
+    implementation("com.squareup.okhttp3:okhttp:4.11.0")
+    
     // Monitoring
     implementation("io.micrometer:micrometer-registry-prometheus")
     

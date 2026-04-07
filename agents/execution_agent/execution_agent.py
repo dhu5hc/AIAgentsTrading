@@ -1,33 +1,39 @@
 """
-Execution Agent - Thực thi lệnh trading
+Execution Agent - Thực thi lệnh trading qua Binance Connector
 """
 import json
 import logging
-from typing import Dict
+from typing import Dict, Optional
 from datetime import datetime
-from binance.client import Client as BinanceClient
-from binance.enums import *
+import sys
+import os
 
 from kafka import KafkaConsumer, KafkaProducer
 import redis
+
+# Add parent directory to path to import binance_client
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from binance_client import BinanceClientWrapper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class ExecutionAgent:
-    """Agent thực thi lệnh"""
+    """Agent thực thi lệnh trading"""
     
     def __init__(self, config: Dict):
         self.config = config
         self.paper_trading = config.get('paper_trading', True)
+        self.backend_url = config.get('backend_url', 'http://localhost:8080')
         
         # Kafka
         self.consumer = KafkaConsumer(
             'approved-signals',
             bootstrap_servers=config['kafka']['bootstrap_servers'],
             value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-            group_id='execution-agent'
+            group_id='execution-agent',
+            auto_offset_reset='earliest'
         )
         
         self.producer = KafkaProducer(
@@ -42,15 +48,18 @@ class ExecutionAgent:
             decode_responses=True
         )
         
-        # Binance client (if live trading)
-        if not self.paper_trading:
-            self.binance_client = BinanceClient(
-                config['binance']['api_key'],
-                config['binance']['api_secret'],
-                testnet=config['binance']['testnet']
-            )
+        # Binance client (using Binance Connector)
+        self.binance_client = BinanceClientWrapper(
+            api_key=config['binance'].get('api_key'),
+            api_secret=config['binance'].get('api_secret'),
+            testnet=config['binance'].get('testnet', True)
+        )
         
         self.running = False
+        self.open_orders = {}  # Track open orders
+        self.account_balance = 0  # Cache account balance
+        
+        logger.info(f"⚡ Execution Agent initialized (paper_trading={self.paper_trading})")
     
     def start(self):
         """Bắt đầu execution agent"""
@@ -58,187 +67,303 @@ class ExecutionAgent:
         mode = "PAPER" if self.paper_trading else "LIVE"
         logger.info(f"⚡ Execution Agent started ({mode} trading)")
         
+        # Load account info
+        self._load_account_info()
+        
         for message in self.consumer:
             if not self.running:
                 break
-                
+            
             try:
                 signal = message.value
+                
+                # Validate signal
+                if not self._validate_signal(signal):
+                    logger.warning(f"Invalid signal: {signal}")
+                    continue
                 
                 # Execute order
                 execution_result = self.execute_order(signal)
                 
-                # Save to database/cache
+                # Cache execution result
                 self._save_execution(execution_result)
                 
-                # Send notification
+                # Send to Kafka
                 self.producer.send('execution-results', execution_result)
                 
                 logger.info(f"⚡ Executed {signal['symbol']} {signal['type']}: "
                            f"{execution_result['status']}")
                 
             except Exception as e:
-                logger.error(f"Error executing order: {e}")
+                logger.error(f"Error executing order: {e}", exc_info=True)
     
     def execute_order(self, signal: Dict) -> Dict:
         """Thực thi lệnh mua/bán"""
         symbol = signal['symbol']
-        order_type = signal['type']
-        position_size = signal['position_size']
-        price = signal['price']
+        order_type = signal['type'].upper()  # BUY or SELL
+        quantity = signal.get('quantity', 0)
+        price = signal.get('price', 0)
         
         execution_result = {
             'signal_id': signal.get('id'),
             'symbol': symbol,
             'type': order_type,
-            'position_size': position_size,
+            'quantity': quantity,
             'requested_price': price,
             'timestamp': datetime.utcnow().isoformat(),
-            'paper_trading': self.paper_trading
+            'mode': 'PAPER_TRADING' if self.paper_trading else 'LIVE_TRADING'
         }
         
-        if self.paper_trading:
-            # Paper trading - simulate execution
-            result = self._execute_paper_order(signal)
-        else:
-            # Live trading - real execution
-            result = self._execute_live_order(signal)
+        try:
+            if self.paper_trading:
+                # Paper trading - simulate execution
+                result = self._execute_paper_order(signal)
+            else:
+                # Live trading - execute on Binance
+                result = self._execute_live_order(signal)
+            
+            execution_result.update(result)
+            
+        except Exception as e:
+            logger.error(f"Order execution failed: {e}")
+            execution_result.update({
+                'status': 'FAILED',
+                'reason': str(e),
+                'error': True
+            })
         
-        execution_result.update(result)
         return execution_result
     
     def _execute_paper_order(self, signal: Dict) -> Dict:
         """Simulate order execution (paper trading)"""
         symbol = signal['symbol']
-        order_type = signal['type']
-        price = signal['price']
-        position_size = signal['position_size']
+        order_type = signal['type'].upper()
+        quantity = signal.get('quantity', 0)
+        price = signal.get('price', 0)
         
-        # Calculate quantity based on position size
-        # Assume portfolio value of $10,000
-        portfolio_value = 10000
-        order_value = portfolio_value * position_size
-        quantity = order_value / price
+        if quantity <= 0 or price <= 0:
+            return {
+                'status': 'REJECTED',
+                'reason': 'Invalid quantity or price',
+                'error': True
+            }
         
-        # Simulate order fill
+        # Generate paper order ID
+        paper_order_id = f"PAPER_{int(datetime.utcnow().timestamp() * 1000)}"
+        
+        order_value = quantity * price
+        commission = order_value * 0.001  # Binance taker fee 0.1%
+        
+        # Cache paper order
+        paper_order = {
+            'order_id': paper_order_id,
+            'symbol': symbol,
+            'side': order_type,
+            'quantity': quantity,
+            'price': price,
+            'status': 'FILLED',
+            'filled_quantity': quantity,
+            'filled_price': price,
+            'commission': commission,
+            'commission_asset': 'USDT',
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        
+        self.redis_client.hset(f"paper_orders:{symbol}", paper_order_id, json.dumps(paper_order))
+        
         return {
             'status': 'FILLED',
-            'order_id': f"PAPER_{datetime.utcnow().timestamp()}",
+            'order_id': paper_order_id,
             'filled_price': price,
             'filled_quantity': quantity,
-            'commission': 0.001 * order_value,  # 0.1% commission
-            'total_cost': order_value + (0.001 * order_value)
+            'commission': commission,
+            'total_cost': order_value + commission,
+            'transaction_time': datetime.utcnow().isoformat()
         }
     
     def _execute_live_order(self, signal: Dict) -> Dict:
         """Execute real order on Binance"""
+        symbol = signal['symbol']
+        order_type = signal['type'].upper()
+        quantity = signal.get('quantity', 0)
+        price = signal.get('price', 0)
+        stop_loss = signal.get('stop_loss')
+        take_profit = signal.get('take_profit')
+        
         try:
-            symbol = signal['symbol']
-            order_type = signal['type']
-            price = signal['price']
-            position_size = signal['position_size']
-            
-            # Get account balance
-            account = self.binance_client.get_account()
-            # TODO: Calculate quantity based on balance
-            
-            # Place order
+            # Place main order
             if order_type == 'BUY':
-                order = self.binance_client.order_market_buy(
+                order = self.binance_client.place_buy_order(
                     symbol=symbol,
-                    quantity=0.001  # TODO: Calculate real quantity
+                    quantity=quantity,
+                    price=price,
+                    order_type='LIMIT'
                 )
-            elif order_type == 'SELL':
-                order = self.binance_client.order_market_sell(
+            else:  # SELL
+                order = self.binance_client.place_sell_order(
                     symbol=symbol,
-                    quantity=0.001
+                    quantity=quantity,
+                    price=price,
+                    order_type='LIMIT'
                 )
-            else:
-                return {'status': 'REJECTED', 'reason': 'Invalid order type'}
             
-            # Place stop loss order
-            if signal.get('stop_loss'):
-                self._place_stop_loss(symbol, order_type, signal['stop_loss'])
+            if not order:
+                return {
+                    'status': 'FAILED',
+                    'reason': 'Failed to place order',
+                    'error': True
+                }
             
-            # Place take profit order
-            if signal.get('take_profit'):
-                self._place_take_profit(symbol, order_type, signal['take_profit'])
+            # Place stop loss if provided
+            sl_order_id = None
+            if stop_loss and stop_loss > 0:
+                opposite_side = 'SELL' if order_type == 'BUY' else 'BUY'
+                sl_price = stop_loss * 0.999  # Slight buffer
+                
+                sl_order = self.binance_client.place_stop_loss_order(
+                    symbol=symbol,
+                    quantity=quantity,
+                    stop_price=stop_loss,
+                    limit_price=sl_price,
+                    side=opposite_side
+                )
+                
+                if sl_order:
+                    sl_order_id = sl_order.get('order_id')
+                    logger.info(f"Stop loss order placed: {sl_order_id}")
+            
+            # Place take profit if provided
+            tp_order_id = None
+            if take_profit and take_profit > 0:
+                opposite_side = 'SELL' if order_type == 'BUY' else 'BUY'
+                tp_price = take_profit * 1.001  # Slight buffer
+                
+                tp_order = self.binance_client.place_take_profit_order(
+                    symbol=symbol,
+                    quantity=quantity,
+                    stop_price=take_profit,
+                    limit_price=tp_price,
+                    side=opposite_side
+                )
+                
+                if tp_order:
+                    tp_order_id = tp_order.get('order_id')
+                    logger.info(f"Take profit order placed: {tp_order_id}")
+            
+            # Track open order
+            self.open_orders[symbol] = {
+                'order_id': order.get('order_id'),
+                'sl_order_id': sl_order_id,
+                'tp_order_id': tp_order_id,
+                'entry_price': price,
+                'quantity': quantity,
+                'place_time': datetime.utcnow().isoformat()
+            }
             
             return {
-                'status': order['status'],
-                'order_id': order['orderId'],
-                'filled_price': float(order.get('fills', [{}])[0].get('price', 0)),
-                'filled_quantity': float(order['executedQty']),
-                'commission': sum([float(f['commission']) for f in order.get('fills', [])])
+                'status': order.get('status', 'PENDING'),
+                'order_id': order.get('order_id'),
+                'filled_price': order.get('filled_price', price),
+                'filled_quantity': order.get('filled_quantity', quantity),
+                'sl_order_id': sl_order_id,
+                'tp_order_id': tp_order_id,
+                'transaction_time': datetime.utcnow().isoformat()
             }
             
         except Exception as e:
             logger.error(f"Live order execution failed: {e}")
             return {
                 'status': 'FAILED',
-                'reason': str(e)
+                'reason': str(e),
+                'error': True
             }
     
-    def _place_stop_loss(self, symbol: str, order_type: str, stop_price: float):
-        """Place stop loss order"""
-        try:
-            if order_type == 'BUY':
-                # Place stop loss sell order
-                self.binance_client.create_order(
-                    symbol=symbol,
-                    side=SIDE_SELL,
-                    type=ORDER_TYPE_STOP_LOSS_LIMIT,
-                    stopPrice=stop_price,
-                    price=stop_price * 0.99,
-                    quantity=0.001  # TODO: Calculate
-                )
-        except Exception as e:
-            logger.error(f"Failed to place stop loss: {e}")
+    def _validate_signal(self, signal: Dict) -> bool:
+        """Validate trading signal"""
+        required_fields = ['symbol', 'type', 'quantity', 'price']
+        
+        for field in required_fields:
+            if field not in signal:
+                logger.warning(f"Missing required field: {field}")
+                return False
+        
+        # Validate values
+        if signal['quantity'] <= 0:
+            logger.warning(f"Invalid quantity: {signal['quantity']}")
+            return False
+        
+        if signal['price'] <= 0:
+            logger.warning(f"Invalid price: {signal['price']}")
+            return False
+        
+        if signal['type'].upper() not in ['BUY', 'SELL']:
+            logger.warning(f"Invalid type: {signal['type']}")
+            return False
+        
+        return True
     
-    def _place_take_profit(self, symbol: str, order_type: str, take_profit: float):
-        """Place take profit order"""
+    def _load_account_info(self):
+        """Load and cache account information"""
         try:
-            if order_type == 'BUY':
-                # Place take profit sell order
-                self.binance_client.create_order(
-                    symbol=symbol,
-                    side=SIDE_SELL,
-                    type=ORDER_TYPE_LIMIT,
-                    price=take_profit,
-                    quantity=0.001  # TODO: Calculate
-                )
+            if self.paper_trading:
+                # Paper trading account balance
+                self.account_balance = 10000  # Default paper account
+            else:
+                # Live trading account balance
+                account = self.binance_client.get_account_info()
+                if account:
+                    balances = account.get('balances', {})
+                    usdt_balance = balances.get('USDT', {}).get('free', 0)
+                    self.account_balance = usdt_balance
+                    logger.info(f"Account balance loaded: ${self.account_balance:.2f}")
         except Exception as e:
-            logger.error(f"Failed to place take profit: {e}")
+            logger.error(f"Error loading account info: {e}")
+            self.account_balance = 0
     
     def _save_execution(self, execution_result: Dict):
         """Save execution result to Redis"""
-        key = f"execution:{execution_result['symbol']}:{execution_result.get('order_id')}"
-        self.redis_client.setex(key, 86400, json.dumps(execution_result))  # 24h TTL
+        try:
+            key = f"executions:{execution_result['symbol']}:{execution_result.get('order_id', 'unknown')}"
+            self.redis_client.setex(
+                key,
+                86400,  # 24 hours TTL
+                json.dumps(execution_result)
+            )
+        except Exception as e:
+            logger.error(f"Error saving execution result: {e}")
+    
+    def get_open_orders(self, symbol: str = None) -> Dict:
+        """Get open orders from Binance"""
+        try:
+            orders = self.binance_client.get_open_orders(symbol=symbol)
+            
+            result = {
+                'symbol': symbol,
+                'count': len(orders),
+                'orders': orders,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error getting open orders: {e}")
+            return {'error': str(e)}
+    
+    def cancel_order(self, symbol: str, order_id: int) -> Dict:
+        """Cancel an order"""
+        try:
+            result = self.binance_client.cancel_order(symbol=symbol, order_id=order_id)
+            
+            if result:
+                logger.info(f"Order {order_id} cancelled for {symbol}")
+                return {'status': 'SUCCESS', 'order': result}
+            else:
+                return {'status': 'FAILED', 'reason': 'Unable to cancel order'}
+        except Exception as e:
+            logger.error(f"Error canceling order: {e}")
+            return {'status': 'FAILED', 'reason': str(e)}
     
     def stop(self):
-        """Dừng agent"""
+        """Stop execution agent"""
         self.running = False
-        self.consumer.close()
-        self.producer.close()
-        logger.info("Execution Agent stopped")
-
-
-if __name__ == "__main__":
-    config = {
-        'kafka': {
-            'bootstrap_servers': ['localhost:9092']
-        },
-        'redis': {
-            'host': 'localhost',
-            'port': 6379
-        },
-        'paper_trading': True,
-        'binance': {
-            'api_key': '',
-            'api_secret': '',
-            'testnet': True
-        }
-    }
-    
-    agent = ExecutionAgent(config)
-    agent.start()
+        logger.info("⚡ Execution Agent stopped")

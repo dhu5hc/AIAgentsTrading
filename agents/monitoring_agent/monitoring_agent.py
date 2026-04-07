@@ -6,10 +6,16 @@ import logging
 from typing import Dict, List
 from datetime import datetime, timedelta
 from collections import defaultdict
+import sys
+import os
 
 from kafka import KafkaConsumer
 import redis
 from prometheus_client import start_http_server, Gauge, Counter
+
+# Add parent directory to path to import binance_client
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from binance_client import BinanceClientWrapper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,7 +34,8 @@ class MonitoringAgent:
             'market-data',
             bootstrap_servers=config['kafka']['bootstrap_servers'],
             value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-            group_id='monitoring-agent'
+            group_id='monitoring-agent',
+            auto_offset_reset='earliest'
         )
         
         # Redis
@@ -38,6 +45,13 @@ class MonitoringAgent:
             decode_responses=True
         )
         
+        # Binance client (using Binance Connector)
+        self.binance_client = BinanceClientWrapper(
+            api_key=config['binance'].get('api_key'),
+            api_secret=config['binance'].get('api_secret'),
+            testnet=config['binance'].get('testnet', True)
+        )
+        
         # Prometheus metrics
         self.metrics = {
             'total_trades': Counter('trading_total_trades', 'Total number of trades'),
@@ -45,6 +59,7 @@ class MonitoringAgent:
             'failed_trades': Counter('trading_failed_trades', 'Failed trades'),
             'portfolio_value': Gauge('trading_portfolio_value', 'Current portfolio value'),
             'daily_pnl': Gauge('trading_daily_pnl', 'Daily profit/loss'),
+            'active_positions': Gauge('trading_active_positions', 'Number of active positions'),
             'win_rate': Gauge('trading_win_rate', 'Win rate percentage'),
             'signals_generated': Counter('trading_signals_generated', 'Signals generated'),
         }
@@ -55,13 +70,15 @@ class MonitoringAgent:
             'signals': [],
             'portfolio_value': 10000,  # Starting value
             'wins': 0,
-            'losses': 0
+            'losses': 0,
+            'active_positions': []
         }
         
         self.running = False
         
         # Start Prometheus metrics server
         start_http_server(8000)
+        logger.info("📊 Monitoring Agent initialized (Prometheus on :8000)")
     
     def start(self):
         """Bắt đầu monitoring agent"""
@@ -139,9 +156,39 @@ class MonitoringAgent:
         self.metrics['win_rate'].set(win_rate)
     
     def _calculate_portfolio_value(self) -> float:
-        """Calculate current portfolio value"""
-        # TODO: Implement real calculation
-        return self.stats['portfolio_value']
+        """Calculate current portfolio value from Binance account"""
+        try:
+            account = self.binance_client.get_account_info()
+            
+            if not account:
+                return self.stats['portfolio_value']
+            
+            total_value = 0
+            balances = account.get('balances', {})
+            
+            # Sum all assets value
+            for asset, balance_info in balances.items():
+                free = balance_info.get('free', 0)
+                locked = balance_info.get('locked', 0)
+                total_holding = free + locked
+                
+                if total_holding > 0:
+                    if asset == 'USDT' or asset == 'BUSD':
+                        # Quote assets directly
+                        total_value += total_holding
+                    else:
+                        # Get current price
+                        ticker = self.binance_client.get_price(f"{asset}USDT")
+                        if ticker:
+                            price = float(ticker['price'])
+                            total_value += total_holding * price
+            
+            self.stats['portfolio_value'] = total_value
+            return total_value
+            
+        except Exception as e:
+            logger.error(f"Error calculating portfolio value: {e}")
+            return self.stats['portfolio_value']
     
     def _calculate_daily_pnl(self) -> float:
         """Calculate daily profit/loss"""
@@ -161,18 +208,30 @@ class MonitoringAgent:
     
     def _check_alerts(self):
         """Check for alert conditions"""
-        # Check daily loss limit
-        daily_pnl = self._calculate_daily_pnl()
-        if daily_pnl < -500:  # Lost $500 today
-            self._send_alert('CRITICAL', f'Daily loss: ${daily_pnl}')
-        
-        # Check drawdown
-        portfolio_value = self._calculate_portfolio_value()
-        initial_value = 10000
-        drawdown = (initial_value - portfolio_value) / initial_value * 100
-        
-        if drawdown > 10:  # 10% drawdown
-            self._send_alert('WARNING', f'Drawdown: {drawdown:.1f}%')
+        try:
+            # Get account to check for anomalies
+            response = requests.get(f"{self.backend_url}/api/binance/account")
+            if response.status_code == 200:
+                account = response.json()
+                
+                # Check if account is under maintenance
+                if 'canTrade' in account and not account['canTrade']:
+                    self._send_alert('CRITICAL', 'Account trading disabled')
+                
+                # Check daily loss limit
+                daily_pnl = self._calculate_daily_pnl()
+                if daily_pnl < -500:  # Lost $500 today
+                    self._send_alert('CRITICAL', f'Daily loss: ${daily_pnl}')
+                
+                # Check drawdown
+                portfolio_value = self._calculate_portfolio_value()
+                initial_value = 10000
+                drawdown = (initial_value - portfolio_value) / initial_value * 100
+                
+                if drawdown > 10:  # 10% drawdown
+                    self._send_alert('WARNING', f'Drawdown: {drawdown:.1f}%')
+        except Exception as e:
+            logger.error(f"Error checking alerts: {e}")
     
     def _send_alert(self, level: str, message: str):
         """Send alert (Slack, Email, etc.)"""
@@ -230,7 +289,8 @@ if __name__ == "__main__":
         'redis': {
             'host': 'localhost',
             'port': 6379
-        }
+        },
+        'backend_url': 'http://localhost:8080'
     }
     
     agent = MonitoringAgent(config)
