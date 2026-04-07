@@ -1,0 +1,95 @@
+spring:
+  application:
+    name: ai-trading-orchestrator
+  
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/trading_db}
+    username: ${SPRING_DATASOURCE_USERNAME:trading_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:trading_pass}
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: orchestrator-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      timeout: 60000
+
+server:
+  port: 8080
+  compression:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+trading:
+  mode: ${TRADING_MODE:paper}  # paper or live
+  
+  risk:
+    max-position-size: 0.1       # 10% of portfolio per trade
+    stop-loss-percent: 0.02      # 2% stop loss
+    take-profit-percent: 0.05    # 5% take profit
+    max-daily-loss: 0.05         # 5% max daily loss
+    max-drawdown: 0.15           # 15% max drawdown
+  
+  api:
+    binance:
+      api-key: ${BINANCE_API_KEY:}
+      api-secret: ${BINANCE_API_SECRET:}
+      testnet: true
+    
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      model: gpt-4-turbo-preview
+  
+  agents:
+    data:
+      enabled: true
+      interval-seconds: 5
+    analysis:
+      enabled: true
+      interval-seconds: 10
+    strategy:
+      enabled: true
+    risk:
+      enabled: true
+    execution:
+      enabled: true
+    monitoring:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.trading: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"

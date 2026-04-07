@@ -1,0 +1,198 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-agent
+  namespace: ai-trading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-agent
+  template:
+    metadata:
+      labels:
+        app: data-agent
+    spec:
+      containers:
+      - name: data-agent
+        image: ai-trading/data-agent:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: trading-config
+        - secretRef:
+            name: trading-secrets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analysis-agent
+  namespace: ai-trading
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: analysis-agent
+  template:
+    metadata:
+      labels:
+        app: analysis-agent
+    spec:
+      containers:
+      - name: analysis-agent
+        image: ai-trading/analysis-agent:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: trading-config
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: strategy-agent
+  namespace: ai-trading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: strategy-agent
+  template:
+    metadata:
+      labels:
+        app: strategy-agent
+    spec:
+      containers:
+      - name: strategy-agent
+        image: ai-trading/strategy-agent:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: trading-config
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-agent
+  namespace: ai-trading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: risk-agent
+  template:
+    metadata:
+      labels:
+        app: risk-agent
+    spec:
+      containers:
+      - name: risk-agent
+        image: ai-trading/risk-agent:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: trading-config
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execution-agent
+  namespace: ai-trading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: execution-agent
+  template:
+    metadata:
+      labels:
+        app: execution-agent
+    spec:
+      containers:
+      - name: execution-agent
+        image: ai-trading/execution-agent:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: trading-config
+        - secretRef:
+            name: trading-secrets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-agent
+  namespace: ai-trading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: monitoring-agent
+  template:
+    metadata:
+      labels:
+        app: monitoring-agent
+    spec:
+      containers:
+      - name: monitoring-agent
+        image: ai-trading/monitoring-agent:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: trading-config
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-agent
+  namespace: ai-trading
+spec:
+  selector:
+    app: monitoring-agent
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP

@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Spring Boot Orchestrator
+  - job_name: 'orchestrator'
+    static_configs:
+      - targets: ['orchestrator:8080']
+    metrics_path: '/actuator/prometheus'
+  
+  # Python Agents
+  - job_name: 'monitoring-agent'
+    static_configs:
+      - targets: ['monitoring-agent:8000']
+  
+  # Kafka Exporter
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+  
+  # Redis Exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']

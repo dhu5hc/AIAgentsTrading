@@ -1,0 +1,182 @@
+#!/bin/bash
+
+# 🎨 Visual Deployment Guide
+cat << 'EOF'
+
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║     🚀 AI TRADING SYSTEM - LOCAL KUBERNETES DEPLOYMENT         ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────┐
+│ 📚 DOCUMENTATION (Read in order)                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1️⃣  KUBERNETES_SETUP.md      ← 👈 START HERE             │
+│      └─ Overview & quick reference                         │
+│                                                             │
+│  2️⃣  K8S_DEPLOYMENT.md         ← Comprehensive guide       │
+│      └─ Detailed instructions (Vietnamese)                 │
+│                                                             │
+│  3️⃣  DEPLOYMENT_LOCAL_K8S.md   ← Quick reference           │
+│      └─ Common tasks & troubleshooting                     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 🛠️  DEPLOYMENT SCRIPTS                                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  STEP 1: Setup Environment (First time only)               │
+│  ═════════════════════════════════════════                │
+│  $ ./setup-k8s-env.sh                                       │
+│    ✓ Check Docker, Minikube, kubectl                       │
+│    ✓ Start Minikube                                        │
+│    ✓ Configure environment                                 │
+│    ✓ Test connectivity                                     │
+│                                                             │
+│  STEP 2: Deploy Everything                                 │
+│  ═════════════════════════════                            │
+│  $ ./deploy-local-k8s.sh                                    │
+│    ✓ Build Docker images                                   │
+│    ✓ Create namespace                                      │
+│    ✓ Deploy Orchestrator                                   │
+│    ✓ Deploy Agents                                         │
+│    ✓ Deploy Infrastructure                                 │
+│    ✓ Show status                                           │
+│                                                             │
+│  STEP 3: Manage with Quick Commands                        │
+│  ═════════════════════════════════════                    │
+│  $ ./quick-deploy.sh [command]                              │
+│    ├─ status         → Check pod status                     │
+│    ├─ logs           → View orchestrator logs               │
+│    ├─ logs-agents    → View agent logs                      │
+│    ├─ port-forward   → Access on localhost:8080             │
+│    ├─ shell          → Get shell access                     │
+│    ├─ restart        → Restart service                      │
+│    └─ clean          → Delete deployment                    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 🏗️  ARCHITECTURE DEPLOYED                                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────────────────────────────────────────┐          │
+│  │         🎯 ORCHESTRATOR (Java Spring Boot)   │          │
+│  │  Port: 8080 │ CPU: 250m-500m │ Mem: 512M-1G │          │
+│  └──────────────────────────────────────────────┘          │
+│                      ↓                                      │
+│  ┌──────────────────────────────────────────────┐          │
+│  │         🤖 AI AGENTS (Python)                │          │
+│  ├──────────────────────────────────────────────┤          │
+│  │ • Data Agent          (100m, 256M)          │          │
+│  │ • Analysis Agent ×2   (200m, 512M each)     │          │
+│  │ • Strategy Agent      (100m, 256M)          │          │
+│  │ • Risk Agent          (100m, 256M)          │          │
+│  │ • Execution Agent     (100m, 256M)          │          │
+│  │ • Monitoring Agent    (100m, 256M)          │          │
+│  └──────────────────────────────────────────────┘          │
+│                      ↓                                      │
+│  ┌──────────────────────────────────────────────┐          │
+│  │     📦 INFRASTRUCTURE                        │          │
+│  ├──────────────────────────────────────────────┤          │
+│  │ • Kafka (Message Broker)                    │          │
+│  │ • Redis (Cache)                             │          │
+│  │ • PostgreSQL (Database)                     │          │
+│  │ • Zookeeper (Kafka Coordination)            │          │
+│  └──────────────────────────────────────────────┘          │
+│                                                             │
+│  Namespace: ai-trading                                      │
+│  Total Resources: ~5 CPU, 8GB RAM (minimum)                │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 📊 MONITORING & ACCESS                                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  View All Resources:                                        │
+│  $ kubectl get all -n ai-trading                            │
+│                                                             │
+│  Port Forward (Access on localhost):                        │
+│  $ ./quick-deploy.sh port-forward                           │
+│  → http://localhost:8080                                    │
+│                                                             │
+│  View Logs:                                                 │
+│  $ ./quick-deploy.sh logs                                   │
+│                                                             │
+│  Get Shell Access:                                          │
+│  $ ./quick-deploy.sh shell                                  │
+│                                                             │
+│  API Health Check:                                          │
+│  $ curl http://localhost:8080/api/health                    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 🔧 SYSTEM REQUIREMENTS                                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Minimum:              Recommended:                         │
+│  • CPU: 2 cores  →     • CPU: 4+ cores                     │
+│  • RAM: 4 GB     →     • RAM: 8+ GB                        │
+│  • Disk: 10 GB   →     • Disk: 20+ GB                      │
+│                                                             │
+│  Software:                                                  │
+│  ✓ Docker              ✓ Minikube          ✓ kubectl       │
+│  ✓ Git                 ✓ Bash/Shell                        │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ ⚡ QUICK START (5 minutes)                                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  # 1. Setup (first time only)                              │
+│  $ ./setup-k8s-env.sh                                       │
+│                                                             │
+│  # 2. Deploy                                                │
+│  $ ./deploy-local-k8s.sh                                    │
+│                                                             │
+│  # 3. Check status                                          │
+│  $ ./quick-deploy.sh status                                 │
+│                                                             │
+│  # 4. Access API                                            │
+│  $ ./quick-deploy.sh port-forward                           │
+│  # In another terminal:                                     │
+│  $ curl http://localhost:8080/api/health                    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 🐛 TROUBLESHOOTING                                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Problem: Pod not running                                   │
+│  Solution: $ ./quick-deploy.sh logs                         │
+│            $ kubectl describe pod <name> -n ai-trading      │
+│                                                             │
+│  Problem: Image not found                                   │
+│  Solution: $ docker build -t ai-trading/name:latest .      │
+│            $ ./quick-deploy.sh restart                      │
+│                                                             │
+│  Problem: Minikube won't start                              │
+│  Solution: $ minikube delete                                │
+│            $ minikube start --cpus=4 --memory=8192          │
+│                                                             │
+│  For detailed help:                                         │
+│  $ cat K8S_DEPLOYMENT.md                                    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║  ✅ DEPLOYMENT READY!                                          ║
+║                                                                ║
+║  Next: Read KUBERNETES_SETUP.md and run setup-k8s-env.sh      ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+
+EOF

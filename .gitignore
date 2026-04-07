@@ -1,0 +1,63 @@
+# Java / Gradle
+.gradle/
+build/
+bin/
+*.class
+*.jar
+*.war
+!gradle-wrapper.jar
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+.DS_Store
+
+# Secrets & Config
+*.env
+.env.local
+secrets/
+*.pem
+*.key
+api-keys.yml
+
+# Models
+ml-models/**/*.pkl
+ml-models/**/*.h5
+ml-models/**/*.pt
+ml-models/**/*.pth
+
+# Data
+data/
+*.csv
+*.parquet
+
+# Logs
+logs/
+*.log
+
+# Docker
+docker-compose.override.yml
+
+# Kubernetes
+kustomization.yml
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# OS
+Thumbs.db

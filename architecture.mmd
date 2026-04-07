@@ -1,0 +1,67 @@
+```mermaid
+graph TB
+    subgraph DataSources["📊 Data Sources"]
+        A1["Binance API"]
+        A2["TradingView"]
+        A3["Twitter/Reddit"]
+        A4["News APIs"]
+        A5["On-Chain Data"]
+    end
+    
+    subgraph Agents["🧠 AI Agents Layer"]
+        B1["Data Agent<br/>Data Collection"]
+        B2["Analysis Agent<br/>Market Analysis"]
+        B3["Strategy Agent<br/>Decision Making"]
+        B4["Risk Agent<br/>Risk Management"]
+        B5["Execution Agent<br/>Order Execution"]
+        B6["Monitoring Agent<br/>Performance Track"]
+    end
+    
+    subgraph Infrastructure["⚙️ Infrastructure"]
+        C1["Kafka<br/>Message Broker"]
+        C2["Redis<br/>Cache & Real-time"]
+        C3["PostgreSQL<br/>Database"]
+    end
+    
+    subgraph Orchestrator["🎯 Backend Orchestrator<br/>Spring Boot"]
+        D1["REST API<br/>Controller"]
+        D2["Trading Service<br/>Business Logic"]
+    end
+    
+    subgraph Monitoring["📈 Monitoring & Logging"]
+        E1["Grafana<br/>Dashboards"]
+        E2["Loki<br/>Log Aggregation"]
+        E3["Prometheus<br/>Metrics"]
+    end
+    
+    subgraph K8s["☸️ Kubernetes"]
+        F1["Container<br/>Orchestration"]
+        F2["Auto Scaling"]
+        F3["Self Healing"]
+    end
+    
+    DataSources -->|Raw Data| B1
+    B1 -->|Processed Data| C1
+    C1 -->|Data Stream| B2
+    B2 -->|Signals| C1
+    C1 -->|Analysis Results| B3
+    B3 -->|Trading Signals| C1
+    C1 -->|Trade Ideas| B4
+    B4 -->|Risk Assessment| C1
+    C1 -->|Approved Orders| B5
+    B5 -->|Orders| D1
+    D1 -->|Execute| C2
+    D1 -->|Store| C3
+    B6 -->|Monitor| E1
+    B6 -->|Logs| E2
+    D2 -->|Metrics| E3
+    E1 -.->|Alert| B4
+    D1 -->|Deploy| F1
+    
+    style DataSources fill:#e1f5ff
+    style Agents fill:#fff3e0
+    style Infrastructure fill:#f3e5f5
+    style Orchestrator fill:#e8f5e9
+    style Monitoring fill:#fce4ec
+    style K8s fill:#ede7f6
+```

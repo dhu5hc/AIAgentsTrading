@@ -1,0 +1,35 @@
+graph TD
+    A["🚀 START<br/>Market Opens"] -->|Trigger| B["1️⃣ Data Collection<br/>Fetch Price, News, Social"]
+    B -->|Real-time data| C["2️⃣ Data Processing<br/>Normalize & Store in Redis"]
+    C -->|Clean data| D["3️⃣ Technical Analysis<br/>RSI, MACD, Bollinger Bands"]
+    D -->|Price patterns| E["4️⃣ Sentiment Analysis<br/>Twitter, Reddit, News"]
+    E -->|Sentiment score| F["5️⃣ ML Prediction<br/>LSTM, Price forecast"]
+    F -->|Predictions| G["6️⃣ Strategy Engine<br/>Generate trading signals"]
+    
+    G -->|BUY/SELL| H{Decision Point}
+    H -->|HOLD| I["❌ No Action"]
+    H -->|BUY/SELL| J["7️⃣ Risk Assessment<br/>Check Position Size, Stop Loss"]
+    
+    J -->|Risk OK| K{Risk Validation}
+    K -->|❌ Too Risky| L["⚠️ Skip Trade<br/>Alert User"]
+    K -->|✅ Safe| M["8️⃣ Order Execution<br/>Send to Binance/Broker"]
+    
+    M -->|Order placed| N["9️⃣ Monitor Position<br/>Track P&L, Adjust SL/TP"]
+    N -->|Trade active| O["🔟 Update Dashboard<br/>Grafana, Logs"]
+    
+    N -->|Take Profit| P["💰 Close Position<br/>Lock Profit"]
+    N -->|Stop Loss| Q["🛑 Close Position<br/>Limit Loss"]
+    
+    P -->|Trade Closed| R["📊 Performance Log<br/>Store metrics in DB"]
+    Q -->|Trade Closed| R
+    I -->|Continue| R
+    L -->|Continue| R
+    
+    R -->|Next iteration| B
+    
+    style A fill:#4caf50,color:#fff
+    style I fill:#ffc107,color:#000
+    style L fill:#f44336,color:#fff
+    style P fill:#2196f3,color:#fff
+    style Q fill:#f44336,color:#fff
+    style R fill:#9c27b0,color:#fff
